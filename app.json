@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "NeuralPilot Fleet",
+    "slug": "fleet-mobile-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1E2025"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.neuralpilot.fleet",
+      "config": {
+        "googleMapsApiKey": "AIzaSyCTO_xdd8oBBB8vjpG21EXGTMNoz_FSz1g"
+      },
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Used to show robot locations on the map."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1E2025"
+      },
+      "package": "com.neuralpilot.fleet",
+      "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"],
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyCTO_xdd8oBBB8vjpG21EXGTMNoz_FSz1g"
+        }
+      }
+    },
+    "plugins": [],
+    "scheme": "fleet"
+  }
+}
