@@ -80,7 +80,7 @@ function WifiIcon({ online }: { online: boolean }) {
   );
 }
 
-export default function HardwareCard({ hardware, isSelected, onSelect, isMissionExecuting = false }: Props) {
+function HardwareCard({ hardware, isSelected, onSelect, isMissionExecuting = false }: Props) {
   const [showAlerts, setShowAlerts] = useState(false);
   const [liveAlerts, setLiveAlerts] = useState<Alert[]>([]);
 
@@ -89,11 +89,16 @@ export default function HardwareCard({ hardware, isSelected, onSelect, isMission
   const hasAlerts = liveAlerts.length > 0 || staticAlertCount > 0;
   const alertCount = liveAlerts.length || staticAlertCount;
 
-  // Clean up stale live alerts after 2s
+  // Clean up stale live alerts after 2s. Only update state when something
+  // actually expired — otherwise we'd re-render every second (the web returns
+  // the same array when nothing changed), which makes the time text "blink".
   useEffect(() => {
     const timer = setInterval(() => {
       const now = Date.now();
-      setLiveAlerts(prev => prev.filter(a => (now - a.lastSeen) < 2000));
+      setLiveAlerts(prev => {
+        const next = prev.filter(a => (now - a.lastSeen) < 2000);
+        return next.length !== prev.length ? next : prev;
+      });
     }, 1000);
     return () => clearInterval(timer);
   }, []);
@@ -122,7 +127,11 @@ export default function HardwareCard({ hardware, isSelected, onSelect, isMission
             <Image source={{ uri: hardware.source }} style={styles.robotImg} resizeMode="cover" />
           ) : (
             <View style={styles.robotImgPlaceholder}>
-              <Text style={styles.robotPlaceholderText}>🤖</Text>
+              <Image
+                source={require('../../assets/robot-card.png')}
+                style={styles.robotImgFallback}
+                resizeMode="contain"
+              />
             </View>
           )}
 
@@ -232,6 +241,25 @@ export default function HardwareCard({ hardware, isSelected, onSelect, isMission
   );
 }
 
+// Memoized exactly like the web app's HardwareCard: re-render only when a
+// meaningful field changes. lastPing is intentionally EXCLUDED so the "X ago" /
+// uptime text doesn't recompute on every socket frame (which makes it blink).
+export default React.memo(HardwareCard, (prev, next) =>
+  prev.isSelected === next.isSelected &&
+  prev.isMissionExecuting === next.isMissionExecuting &&
+  prev.hardware.id === next.hardware.id &&
+  prev.hardware.battery === next.hardware.battery &&
+  prev.hardware.state === next.hardware.state &&
+  prev.hardware.online === next.hardware.online &&
+  prev.hardware.status === next.hardware.status &&
+  prev.hardware.uptime === next.hardware.uptime &&
+  prev.hardware.warningCount === next.hardware.warningCount &&
+  prev.hardware.aliasName === next.hardware.aliasName &&
+  (prev.hardware.alerts?.length ?? 0) === (next.hardware.alerts?.length ?? 0) &&
+  prev.hardware.coordinates?.lat === next.hardware.coordinates?.lat &&
+  prev.hardware.coordinates?.lng === next.hardware.coordinates?.lng,
+);
+
 const styles = StyleSheet.create({
   card: {
     backgroundColor: Colors.card,
@@ -264,6 +292,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     flexShrink: 0,
+  },
+  robotImgFallback: {
+    width: '100%',
+    height: '100%',
   },
   robotPlaceholderText: { fontSize: 28 },
   infoCol: {

@@ -23,14 +23,28 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const connect = async () => {
     const token = await storage.getItem<string>('token');
     if (!token) return;
+    // Prefer the stored userId; fall back to the logged-in user's id so existing
+    // sessions (logged in before userId was persisted) still send the uuid.
+    const storedUserId = await storage.getItem<string>('userId');
+    const storedUser = await storage.getItem<{ id?: string }>('user');
+    const userId = storedUserId ?? storedUser?.id ?? '';
 
     if (socketRef.current) {
       socketRef.current.disconnect();
     }
 
-    const socket = io(SOCKET_URL, {
+    // Must match the web app exactly: connect to the "/frontend" namespace and
+    // send the uuid headers — robot:status events are emitted on this namespace,
+    // so the default namespace receives nothing (every robot stays offline).
+    const socket = io(`${SOCKET_URL}/frontend`, {
       auth: { token },
-      transports: ['websocket'],
+      extraHeaders: {
+        Authorization: `Bearer ${token}`,
+        token,
+        uuid: userId,
+        'x-uuid': userId,
+      },
+      transports: ['polling', 'websocket'],
       reconnectionAttempts: 5,
       reconnectionDelay: 2000,
     });

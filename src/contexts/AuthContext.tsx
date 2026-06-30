@@ -33,9 +33,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     })();
   }, []);
 
-  const login = async (accessToken: string, _userId: string, userData: User) => {
+  const login = async (accessToken: string, userId: string, userData: User) => {
     await storage.setItem('token', accessToken);
     await storage.setItem('user', userData);
+    // The socket handshake needs the userId (sent as the uuid header), same as
+    // the web app — store it so SocketContext can read it.
+    await storage.setItem('userId', userId ?? userData?.id ?? '');
     setToken(accessToken);
     setUser(userData);
   };

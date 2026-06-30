@@ -18,6 +18,7 @@ import FleetMapView from '@/components/FleetMap';
 import { robotApi } from '@/api/robot';
 import { useSocket } from '@/contexts/SocketContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { useStaleOfflineDetection } from '@/hooks/useStaleOfflineDetection';
 import type { Hardware, FleetStats } from '@/lib/types';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -71,6 +72,12 @@ export default function FleetOverviewScreen() {
   const hardwaresRef = useRef(hardwares);
   hardwaresRef.current = hardwares;
 
+  // Robots we've already asked the server for live status (avoid re-emitting).
+  const statusRequestedRef = useRef<Set<string>>(new Set());
+
+  // Flip robots offline ~2s after their updates stop — exactly like the web.
+  useStaleOfflineDetection(setHardwares);
+
   // ── Fetch robots ──
   const fetchRobots = useCallback(async () => {
     try {
@@ -109,34 +116,47 @@ export default function FleetOverviewScreen() {
   useEffect(() => {
     if (!socket) return;
 
-    const handleRobotStatus = (data: {
+    // Server sends a BATCH: { robots: [{ robotId, online, state, battery,
+    // location|position, lastUpdated, speed, uptime }, ...] } — same shape the
+    // web app consumes. (The old single-robot shape never matched, so nothing
+    // ever went online.)
+    type RobotStatusUpdate = {
       robotId: string;
       online: boolean;
-      status?: string;
-      battery?: number;
-      position?: { lat: number; lon: number; yaw?: number };
-      uptime?: number;
       state?: string;
-    }) => {
+      battery?: number;
+      location?: { lat: number; lon: number; yaw?: number };
+      position?: { lat: number; lon: number; yaw?: number };
+      lastUpdated?: string;
+      uptime?: number;
+    };
+    const handleRobotStatus = (data: { robots?: RobotStatusUpdate[] }) => {
+      const updates = data?.robots;
+      if (!Array.isArray(updates) || updates.length === 0) return;
       setHardwares((prev) =>
         prev.map((hw) => {
-          if (hw.id !== data.robotId) return hw;
-          const coords = data.position
-            ? { lat: data.position.lat, lng: data.position.lon }
-            : hw.coordinates;
-          const pos = data.position
-            ? { lat: data.position.lat, lng: data.position.lon, yaw: data.position.yaw ?? hw.yaw }
-            : hw.position;
+          const u = updates.find((r) => r.robotId === hw.id);
+          if (!u) return hw;
+
+          const status: Hardware['status'] =
+            u.state === 'WARNING' ? 'warning' : u.online ? 'online' : 'offline';
+
+          // Server prefers 'location', falls back to 'position'.
+          const sp = u.location ?? u.position;
+          const validPos =
+            sp && typeof sp.lat === 'number' && typeof sp.lon === 'number' &&
+            !(sp.lat === 0 && sp.lon === 0);
+
           return {
             ...hw,
-            online: data.online,
-            status: data.online ? 'online' : 'offline',
-            battery: data.battery ?? hw.battery,
-            state: data.state ?? hw.state,
-            coordinates: coords,
-            position: pos,
-            lastPing: new Date(),
-            uptime: data.uptime ?? hw.uptime,
+            online: u.online,
+            status,
+            battery: u.battery ?? hw.battery,
+            state: u.online ? (u.state ?? hw.state) : (hw.state ?? u.state),
+            coordinates: validPos ? { lat: sp!.lat, lng: sp!.lon } : hw.coordinates,
+            position: validPos ? { lat: sp!.lat, lng: sp!.lon, yaw: sp!.yaw ?? hw.yaw } : hw.position,
+            lastPing: u.online ? new Date(u.lastUpdated ?? Date.now()) : (hw.lastPing ?? new Date()),
+            uptime: u.uptime ?? hw.uptime,
           };
         }),
       );
@@ -164,20 +184,32 @@ export default function FleetOverviewScreen() {
 
     if (socket.connected) requestInitStates();
 
-    // Request status for each known robot
-    hardwaresRef.current.forEach((hw) => {
-      if (hw.id !== 'garage-home') {
-        socket.emit('robot:request_status', { robotId: hw.id });
-      }
-    });
+    // On (re)connect, clear the requested set so we re-ask for everyone's status.
+    const resetRequested = () => { statusRequestedRef.current = new Set(); };
+    socket.on('connect', resetRequested);
 
     return () => {
       socket.off('robot:status', handleRobotStatus);
       socket.off('execution:sync', handleExecutionSync);
       socket.off('execution:init', handleExecutionInit);
       socket.off('connect', requestInitStates);
+      socket.off('connect', resetRequested);
     };
   }, [socket]);
+
+  // Request live status for each robot once it's actually known AND the socket
+  // is connected. The previous code emitted at socket-mount time when only the
+  // garage existed, so it asked for nothing and every robot stayed offline.
+  // (Mirrors the web app's per-robot robot:request_status effect.)
+  useEffect(() => {
+    if (!socket || !isConnected || hardwares.length === 0) return;
+    hardwares.forEach((hw) => {
+      if (hw.id === 'garage-home') return;
+      if (statusRequestedRef.current.has(hw.id)) return;
+      statusRequestedRef.current.add(hw.id);
+      socket.emit('robot:request_status', { robotId: hw.id });
+    });
+  }, [socket, isConnected, hardwares]);
 
   // ── Fleet stats ──
   const sidebarHardwares = useMemo(
